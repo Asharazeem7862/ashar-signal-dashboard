@@ -1,0 +1,101 @@
+import React, { useEffect, useState } from 'react';
+import { Line } from 'react-chartjs-2';
+import axios from 'axios';
+import { RSI, EMA, MACD } from 'technicalindicators';
+import {
+  Chart as ChartJS,
+  LineElement,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+} from 'chart.js';
+
+ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement);
+
+export default function Home() {
+  const [candleData, setCandleData] = useState([]);
+  const [prediction, setPrediction] = useState(null);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 60000); // update every minute
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      const res = await axios.get('https://www.alphavantage.co/query', {
+        params: {
+          function: 'TIME_SERIES_INTRADAY',
+          symbol: 'EURUSD',
+          interval: '1min',
+          apikey: 'demo'
+        }
+      });
+
+      const rawData = res.data['Time Series (1min)'];
+      const parsedData = Object.keys(rawData).map(time => ({
+        time,
+        open: parseFloat(rawData[time]['1. open']),
+        high: parseFloat(rawData[time]['2. high']),
+        low: parseFloat(rawData[time]['3. low']),
+        close: parseFloat(rawData[time]['4. close'])
+      })).reverse();
+
+      setCandleData(parsedData);
+      analyze(parsedData);
+    } catch (error) {
+      console.error('Fetch error:', error);
+    }
+  };
+
+  const analyze = (data) => {
+    const closes = data.map(d => d.close);
+    const inputRSI = { values: closes, period: 14 };
+    const rsi = RSI.calculate(inputRSI);
+    const ema = EMA.calculate({ period: 9, values: closes });
+    const macd = MACD.calculate({
+      values: closes,
+      fastPeriod: 12,
+      slowPeriod: 26,
+      signalPeriod: 9,
+      SimpleMAOscillator: false,
+      SimpleMASignal: false
+    });
+
+    const latestClose = closes[closes.length - 1];
+    const latestRSI = rsi[rsi.length - 1];
+    const latestEMA = ema[ema.length - 1];
+    const latestMACD = macd[macd.length - 1];
+
+    if (latestRSI < 30 && latestClose > latestEMA && latestMACD.histogram > 0) {
+      setPrediction('🟢 BUY');
+    } else if (latestRSI > 70 && latestClose < latestEMA && latestMACD.histogram < 0) {
+      setPrediction('🔴 SELL');
+    } else {
+      setPrediction('⚪ WAIT');
+    }
+  };
+
+  return (
+    <div style={{ padding: 20, fontFamily: 'Arial' }}>
+      <h1>Ashar Signal Dashboard 📈</h1>
+      <h2>Next Candle Prediction: <strong>{prediction}</strong></h2>
+      <div style={{ height: 400 }}>
+        <Line
+          data={{
+            labels: candleData.map(d => d.time.slice(11, 16)),
+            datasets: [
+              {
+                label: 'Close Price',
+                data: candleData.map(d => d.close),
+                borderColor: 'blue',
+                fill: false
+              }
+            ]
+          }}
+        />
+      </div>
+    </div>
+  );
+}
